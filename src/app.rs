@@ -66,7 +66,7 @@ pub struct App {
     pub stage: String,
 
     command_runner: CommandRunner,
-    event_tx: mpsc::Sender<AppEvent>,
+    _event_tx: mpsc::Sender<AppEvent>,
 }
 
 impl App {
@@ -99,7 +99,7 @@ impl App {
             stage: String::new(),
 
             command_runner: CommandRunner::new(event_tx.clone()),
-            event_tx,
+            _event_tx: event_tx,
         }
     }
 

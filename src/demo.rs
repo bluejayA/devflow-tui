@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use crate::app::App;
 use crate::event::AppEvent;
 use crate::parser::models::{
