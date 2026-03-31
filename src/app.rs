@@ -9,6 +9,7 @@ use crate::command::CommandRunner;
 use crate::component::Component;
 use crate::event::AppEvent;
 use crate::panel::agent_status::AgentStatusPanel;
+use crate::panel::artifact_preview::ArtifactPreviewPanel;
 use crate::panel::audit_log::AuditLogPanel;
 use crate::panel::gate_alert::GateAlertPanel;
 use crate::panel::git_status::GitStatusPanel;
@@ -23,6 +24,7 @@ pub enum FocusPane {
     GitStatus,
     AgentStatus,
     AuditLog,
+    ArtifactPreview,
     GateAlert,
 }
 
@@ -31,6 +33,7 @@ pub enum InputMode {
     Normal,
     Expanded,
     HelpOverlay,
+    ArtifactModal,
 }
 
 #[derive(Debug, Clone)]
@@ -50,6 +53,7 @@ pub struct App {
     pub git_status: GitStatusPanel,
     pub agent_status: AgentStatusPanel,
     pub audit_log: AuditLogPanel,
+    pub artifact_preview: ArtifactPreviewPanel,
     pub gate_alert: GateAlertPanel,
 
     pub layout: LayoutManager,
@@ -82,6 +86,7 @@ impl App {
             git_status: GitStatusPanel::new(),
             agent_status: AgentStatusPanel::new(),
             audit_log: AuditLogPanel::new(),
+            artifact_preview: ArtifactPreviewPanel::new(),
             gate_alert: GateAlertPanel::new(),
 
             layout: LayoutManager::new(width, height),
@@ -105,6 +110,7 @@ impl App {
                 FocusPane::GitStatus,
                 FocusPane::AgentStatus,
                 FocusPane::AuditLog,
+                FocusPane::ArtifactPreview,
                 FocusPane::GateAlert,
             ],
             _ => vec![
@@ -132,6 +138,7 @@ impl App {
             FocusPane::GitStatus => "Git Status",
             FocusPane::AgentStatus => "Agent Status",
             FocusPane::AuditLog => "Audit Log",
+            FocusPane::ArtifactPreview => "Artifacts",
             FocusPane::GateAlert => "Gate Alert",
         }
     }
@@ -142,6 +149,7 @@ impl App {
             FocusPane::GitStatus => &mut self.git_status,
             FocusPane::AgentStatus => &mut self.agent_status,
             FocusPane::AuditLog => &mut self.audit_log,
+            FocusPane::ArtifactPreview => &mut self.artifact_preview,
             FocusPane::GateAlert => &mut self.gate_alert,
         }
     }
@@ -170,6 +178,17 @@ impl App {
                         true
                     }
                 }
+            }
+            InputMode::ArtifactModal => {
+                match key.code {
+                    KeyCode::Esc => {
+                        self.input_mode = InputMode::Normal;
+                    }
+                    _ => {
+                        self.artifact_preview.handle_key(key);
+                    }
+                }
+                true
             }
             InputMode::Normal => self.handle_normal_key(key),
         }
@@ -200,6 +219,10 @@ impl App {
             }
             KeyCode::Char('r') => {
                 self.command_runner.execute(Action::Refresh);
+                return true;
+            }
+            KeyCode::Char('a') => {
+                self.input_mode = InputMode::ArtifactModal;
                 return true;
             }
             KeyCode::Char('c') => {
@@ -256,6 +279,9 @@ impl App {
             Action::CollapsePanel => {
                 self.input_mode = InputMode::Normal;
             }
+            Action::OpenArtifactModal => {
+                self.input_mode = InputMode::ArtifactModal;
+            }
             Action::Quit => {
                 self.should_quit = true;
             }
@@ -287,6 +313,7 @@ impl App {
         self.git_status.handle_event(&event);
         self.agent_status.handle_event(&event);
         self.audit_log.handle_event(&event);
+        self.artifact_preview.handle_event(&event);
         self.gate_alert.handle_event(&event);
 
         // App-level handling
@@ -325,6 +352,11 @@ impl App {
     pub fn on_resize(&mut self, w: u16, h: u16) {
         self.layout.on_resize(w, h);
         self.ensure_valid_focus();
+        if self.input_mode == InputMode::ArtifactModal
+            && self.layout.mode() != LayoutMode::Wide
+        {
+            self.input_mode = InputMode::Normal;
+        }
         self.workflow_map.scroll_offset = 0;
         self.git_status.clamp_scroll();
         self.agent_status.clamp_scroll();
@@ -429,6 +461,10 @@ impl App {
             InputMode::Expanded => {
                 self.render_focused_panel(frame, body);
             }
+            InputMode::ArtifactModal => {
+                self.render_panels(frame, body);
+                self.render_artifact_modal(frame, frame.area());
+            }
             InputMode::Normal => {
                 self.render_panels(frame, body);
             }
@@ -483,12 +519,8 @@ impl App {
                 self.audit_log
                     .render(frame, audit_log, focus == FocusPane::AuditLog);
 
-                // Artifacts placeholder (deferred to v1.1)
-                let placeholder = ratatui::widgets::Block::bordered()
-                    .border_type(ratatui::widgets::BorderType::Rounded)
-                    .title(crate::ui::theme::panel_title("Artifacts", false))
-                    .border_style(crate::ui::theme::Theme::unfocus_border());
-                frame.render_widget(placeholder, artifacts);
+                self.artifact_preview
+                    .render(frame, artifacts, focus == FocusPane::ArtifactPreview);
 
                 // Gate Alert panel
                 self.gate_alert
@@ -497,12 +529,28 @@ impl App {
         }
     }
 
+    fn render_artifact_modal(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        // Center overlay: 80% width, 80% height
+        let w = area.width * 80 / 100;
+        let h = area.height * 80 / 100;
+        let x = area.x + (area.width - w) / 2;
+        let y = area.y + (area.height - h) / 2;
+        let modal_area = ratatui::layout::Rect::new(x, y, w, h);
+
+        // Clear background
+        let clear = ratatui::widgets::Clear;
+        frame.render_widget(clear, modal_area);
+
+        self.artifact_preview.render(frame, modal_area, true);
+    }
+
     fn render_focused_panel(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
         match self.focus {
             FocusPane::WorkflowMap => self.workflow_map.render(frame, area, true),
             FocusPane::GitStatus => self.git_status.render(frame, area, true),
             FocusPane::AgentStatus => self.agent_status.render(frame, area, true),
             FocusPane::AuditLog => self.audit_log.render(frame, area, true),
+            FocusPane::ArtifactPreview => self.artifact_preview.render(frame, area, true),
             FocusPane::GateAlert => self.gate_alert.render(frame, area, true),
         }
     }
@@ -825,8 +873,9 @@ mod tests {
     fn test_available_panels_wide_includes_gate() {
         let app = make_app(200, 50);
         let panels = app.available_panels();
-        assert_eq!(panels.len(), 5);
+        assert_eq!(panels.len(), 6);
         assert!(panels.contains(&FocusPane::GateAlert));
+        assert!(panels.contains(&FocusPane::ArtifactPreview));
     }
 
     #[test]
@@ -855,5 +904,83 @@ mod tests {
         });
         let buf = terminal.backend().buffer();
         assert!(buffer_contains_str(buf, "Gate Alert"));
+    }
+
+    // ── ArtifactPreview integration tests ──
+
+    #[test]
+    fn test_wide_layout_renders_artifact_panel() {
+        let mut app = make_app(200, 50);
+        let terminal = render_with(200, 50, |frame, _area| {
+            app.render(frame);
+        });
+        let buf = terminal.backend().buffer();
+        assert!(buffer_contains_str(buf, "Artifacts"));
+    }
+
+    #[test]
+    fn test_focus_artifact_preview() {
+        let mut app = make_app(200, 50);
+        // Tab to ArtifactPreview (should be in available panels)
+        let panels = app.available_panels();
+        assert!(panels.contains(&FocusPane::ArtifactPreview));
+
+        app.focus = FocusPane::ArtifactPreview;
+        assert_eq!(app.focus_name(), "Artifacts");
+    }
+
+    #[test]
+    fn test_wide_tab_cycles_six_panels() {
+        let mut app = make_app(200, 50);
+        let panels = app.available_panels();
+        assert_eq!(panels.len(), 6);
+
+        // Cycle through all 6 panels
+        app.handle_key(KeyEvent::from(KeyCode::Tab)); // → GitStatus
+        app.handle_key(KeyEvent::from(KeyCode::Tab)); // → AgentStatus
+        app.handle_key(KeyEvent::from(KeyCode::Tab)); // → AuditLog
+        app.handle_key(KeyEvent::from(KeyCode::Tab)); // → ArtifactPreview
+        assert_eq!(app.focus, FocusPane::ArtifactPreview);
+        app.handle_key(KeyEvent::from(KeyCode::Tab)); // → GateAlert
+        assert_eq!(app.focus, FocusPane::GateAlert);
+        app.handle_key(KeyEvent::from(KeyCode::Tab)); // → WorkflowMap (wrap)
+        assert_eq!(app.focus, FocusPane::WorkflowMap);
+    }
+
+    // ── ArtifactModal mode tests ──
+
+    #[test]
+    fn test_a_key_opens_artifact_modal() {
+        let mut app = make_app(80, 24);
+        app.handle_key(KeyEvent::from(KeyCode::Char('a')));
+        assert_eq!(app.input_mode, InputMode::ArtifactModal);
+    }
+
+    #[test]
+    fn test_esc_closes_artifact_modal() {
+        let mut app = make_app(80, 24);
+        app.input_mode = InputMode::ArtifactModal;
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_artifact_modal_renders_overlay() {
+        let mut app = make_app(120, 30);
+        app.input_mode = InputMode::ArtifactModal;
+        let terminal = render_with(120, 30, |frame, _area| {
+            app.render(frame);
+        });
+        let buf = terminal.backend().buffer();
+        assert!(buffer_contains_str(buf, "Artifacts"));
+    }
+
+    #[test]
+    fn test_resize_from_wide_closes_modal() {
+        let mut app = make_app(200, 50);
+        app.input_mode = InputMode::ArtifactModal;
+        // Resize to Standard — modal should close
+        app.on_resize(120, 30);
+        assert_eq!(app.input_mode, InputMode::Normal);
     }
 }
