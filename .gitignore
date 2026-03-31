@@ -1,0 +1,13 @@
+/target
+.env*
+*secret*
+*credential*
+*.pem
+*.key
+*.p12
+*.pfx
+session_*
+client_secret_*.json
+credentials.json
+devflow-docs/.tui-token
+.DS_Store
