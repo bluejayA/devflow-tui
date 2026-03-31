@@ -6,7 +6,7 @@
 *.key
 *.p12
 *.pfx
-session_*
+/session_*
 client_secret_*.json
 credentials.json
 devflow-docs/.tui-token
