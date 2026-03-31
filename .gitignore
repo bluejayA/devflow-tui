@@ -11,3 +11,4 @@ client_secret_*.json
 credentials.json
 devflow-docs/.tui-token
 .DS_Store
+.worktrees/
