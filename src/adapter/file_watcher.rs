@@ -164,29 +164,109 @@ fn find_audit_file(devflow_dir: &Path) -> Option<PathBuf> {
     None
 }
 
+const MAX_SCAN_DEPTH: usize = 10;
+
 async fn scan_artifacts(devflow_dir: &Path) -> Vec<ArtifactFile> {
     let mut artifacts = Vec::new();
     for subdir in &["inception", "construction"] {
         let dir = devflow_dir.join(subdir);
-        if dir.exists()
-            && let Ok(mut entries) = tokio::fs::read_dir(&dir).await
-        {
-            while let Ok(Some(entry)) = entries.next_entry().await {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "md") {
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    artifacts.push(ArtifactFile { path, name });
-                }
-            }
+        if dir.exists() {
+            scan_dir_recursive(&dir, devflow_dir, &mut artifacts, 0).await;
         }
     }
     artifacts
 }
 
-// Note: Integration tests for file_watcher require tokio runtime + temp dirs.
-// These are better placed in tests/ directory or as #[tokio::test] with tempfile crate.
-// Unit-level tests cover the parsers (Unit 2). This module's correctness depends on
-// notify crate behavior which is tested via manual/integration testing.
+async fn scan_dir_recursive(
+    dir: &Path,
+    base_dir: &Path,
+    artifacts: &mut Vec<ArtifactFile>,
+    depth: usize,
+) {
+    if depth > MAX_SCAN_DEPTH {
+        return;
+    }
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path.is_dir() {
+            Box::pin(scan_dir_recursive(&path, base_dir, artifacts, depth + 1)).await;
+        } else if path.extension().is_some_and(|ext| ext == "md") {
+            let name = path
+                .strip_prefix(base_dir)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| {
+                    path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                });
+            artifacts.push(ArtifactFile { path, name });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_scan_artifacts_recursive() {
+        let tmp = TempDir::new().unwrap();
+        let devflow = tmp.path().join("devflow-docs");
+
+        // Top-level files in construction/
+        let construction = devflow.join("construction");
+        fs::create_dir_all(&construction).unwrap();
+        fs::write(construction.join("plan.md"), "# Plan").unwrap();
+
+        // Nested: construction/artifact-preview/code-plan.md
+        let nested = construction.join("artifact-preview");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("code-plan.md"), "# Code Plan").unwrap();
+
+        // inception/ top-level
+        let inception = devflow.join("inception");
+        fs::create_dir_all(&inception).unwrap();
+        fs::write(inception.join("requirements.md"), "# Req").unwrap();
+
+        let mut artifacts = scan_artifacts(&devflow).await;
+        artifacts.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // M2: names are now relative paths from devflow-docs/
+        let names: Vec<&str> = artifacts.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, vec![
+            "construction/artifact-preview/code-plan.md",
+            "construction/plan.md",
+            "inception/requirements.md",
+        ]);
+    }
+
+    #[tokio::test]
+    async fn test_scan_artifacts_depth_limit() {
+        let tmp = TempDir::new().unwrap();
+        let devflow = tmp.path().join("devflow-docs");
+
+        // Create deeply nested directory (12 levels > MAX_SCAN_DEPTH=10)
+        let mut dir = devflow.join("construction");
+        for i in 0..12 {
+            dir = dir.join(format!("level{i}"));
+        }
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("deep.md"), "# Deep").unwrap();
+
+        // Also a reachable file
+        let construction = devflow.join("construction");
+        fs::write(construction.join("top.md"), "# Top").unwrap();
+
+        let artifacts = scan_artifacts(&devflow).await;
+        let names: Vec<&str> = artifacts.iter().map(|a| a.name.as_str()).collect();
+
+        // top.md should be found, deep.md should NOT (beyond depth limit)
+        assert!(names.iter().any(|n| n.contains("top.md")));
+        assert!(!names.iter().any(|n| n.contains("deep.md")));
+    }
+}
