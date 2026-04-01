@@ -87,10 +87,14 @@ pub async fn run_event_loop(
             }
         }
 
-        // Adapter supervisor: detect crashed adapters (warn once per adapter)
+        // Adapter supervisor: detect crashed adapters and notify App
         for handle in &adapter_handles {
             if handle.is_finished() && warned_adapters.insert(handle.name()) {
                 tracing::warn!("Adapter '{}' finished unexpectedly", handle.name());
+                app.handle_event(AppEvent::AdapterCrashed {
+                    name: handle.name().to_string(),
+                });
+                needs_render = true;
             }
         }
 
