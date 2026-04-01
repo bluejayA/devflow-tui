@@ -327,6 +327,10 @@ impl App {
                 self.hooks_active = false;
                 self.hook_setup = HookSetupState::Unknown;
             }
+            AppEvent::AdapterCrashed { name } if name == "hooks_server" => {
+                self.hooks_active = false;
+                self.hook_setup = HookSetupState::Unknown;
+            }
             AppEvent::FlowStateChanged(state) => {
                 self.phase = state.phase.to_string();
                 self.stage = state.stage.clone();
@@ -711,6 +715,27 @@ mod tests {
             reason: "bind error".to_string(),
         });
         assert!(!app.hooks_active);
+    }
+
+    #[test]
+    fn test_handle_event_adapter_crashed_hooks_server() {
+        let mut app = make_app(80, 24);
+        app.hooks_active = true;
+        app.handle_event(AppEvent::AdapterCrashed {
+            name: "hooks_server".to_string(),
+        });
+        assert!(!app.hooks_active);
+    }
+
+    #[test]
+    fn test_handle_event_adapter_crashed_other() {
+        let mut app = make_app(80, 24);
+        app.hooks_active = true;
+        app.handle_event(AppEvent::AdapterCrashed {
+            name: "file_watcher".to_string(),
+        });
+        // hooks_active should remain true for non-hooks adapters
+        assert!(app.hooks_active);
     }
 
     #[test]

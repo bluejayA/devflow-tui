@@ -56,6 +56,9 @@ pub enum AppEvent {
         action_name: String,
         error: String,
     },
+    AdapterCrashed {
+        name: String,
+    },
 }
 
 #[cfg(test)]
