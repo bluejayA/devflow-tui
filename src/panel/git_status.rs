@@ -56,6 +56,20 @@ fn commit_style(message: &str) -> Style {
     }
 }
 
+/// Returns true if the fetch elapsed string represents >= 30 minutes.
+fn is_stale_fetch(text: &str) -> bool {
+    // "30m ago" or more → stale; also "Nh ago", "Nd ago" are stale
+    if text.ends_with("h ago") || text.ends_with("d ago") {
+        return true;
+    }
+    if let Some(num_str) = text.strip_suffix("m ago")
+        && let Ok(mins) = num_str.parse::<u64>()
+    {
+        return mins >= 30;
+    }
+    false
+}
+
 pub struct GitStatusPanel {
     snapshot: GitSnapshot,
     changes_state: ListState,
@@ -143,8 +157,8 @@ impl Component for GitStatusPanel {
             return;
         }
 
-        // Split inner: header(3) | changes(fill) | bottom(commits + worktrees)
-        let header_h = 3u16;
+        // Split inner: header(4) | changes(fill) | bottom(commits + worktrees)
+        let header_h = 4u16;
         let worktrees_h = if self.snapshot.worktrees.is_empty() {
             0
         } else {
@@ -160,15 +174,38 @@ impl Component for GitStatusPanel {
         ])
         .areas(inner);
 
-        // Header: branch + HEAD + diff stat
+        // Header: branch + HEAD + fetch + diff stat
+        let mut branch_spans = vec![
+            Span::from("  Branch: ").dim(),
+            Span::from(self.snapshot.branch.as_str()).cyan().bold(),
+        ];
+        if self.snapshot.ahead > 0 {
+            branch_spans.push(Span::from(format!(" ↑{}", self.snapshot.ahead)).green());
+        }
+        if self.snapshot.behind > 0 {
+            branch_spans.push(Span::from(format!(" ↓{}", self.snapshot.behind)).red());
+        }
+
+        let fetch_text = self
+            .snapshot
+            .last_fetch
+            .as_deref()
+            .unwrap_or("never");
+        let fetch_style = match fetch_text {
+            "never" => Style::default().fg(Color::DarkGray),
+            t if is_stale_fetch(t) => Style::default().fg(Color::Yellow),
+            _ => Style::default().dim(),
+        };
+
         let header_lines = vec![
-            Line::from(vec![
-                Span::from("  Branch: ").dim(),
-                Span::from(self.snapshot.branch.as_str()).cyan().bold(),
-            ]),
+            Line::from(branch_spans),
             Line::from(vec![
                 Span::from("  HEAD:   ").dim(),
                 Span::from(self.snapshot.head.as_str()).dim(),
+            ]),
+            Line::from(vec![
+                Span::from("  Fetch:  ").dim(),
+                Span::from(fetch_text).style(fetch_style),
             ]),
             Line::from(vec![
                 Span::from("  Diff:   ").dim(),
@@ -458,6 +495,70 @@ mod tests {
         let buf = terminal.backend().buffer();
         assert!(buffer_contains_str(buf, "Worktrees:"));
         assert!(buffer_contains_str(buf, "feature/wt"));
+    }
+
+    #[test]
+    fn render_branch_ahead_behind() {
+        let mut panel = GitStatusPanel::new();
+        panel.set_snapshot(GitSnapshot {
+            branch: "feature/test".to_string(),
+            head: "abc1234".to_string(),
+            ahead: 3,
+            behind: 1,
+            base_branch: "origin/main".to_string(),
+            ..Default::default()
+        });
+        let terminal = render_component(&mut panel, 60, 20, true);
+        let buf = terminal.backend().buffer();
+        assert!(buffer_contains_str(buf, "↑3"));
+        assert!(buffer_contains_str(buf, "↓1"));
+    }
+
+    #[test]
+    fn render_fetch_time() {
+        let mut panel = GitStatusPanel::new();
+        panel.set_snapshot(GitSnapshot {
+            branch: "main".to_string(),
+            head: "abc1234".to_string(),
+            last_fetch: Some("3m ago".to_string()),
+            ..Default::default()
+        });
+        let terminal = render_component(&mut panel, 60, 20, true);
+        let buf = terminal.backend().buffer();
+        assert!(buffer_contains_str(buf, "Fetch:"));
+        assert!(buffer_contains_str(buf, "3m ago"));
+    }
+
+    #[test]
+    fn render_fetch_never() {
+        let mut panel = GitStatusPanel::new();
+        panel.set_snapshot(GitSnapshot {
+            branch: "main".to_string(),
+            head: "abc1234".to_string(),
+            last_fetch: None,
+            ..Default::default()
+        });
+        let terminal = render_component(&mut panel, 60, 20, true);
+        let buf = terminal.backend().buffer();
+        assert!(buffer_contains_str(buf, "Fetch:"));
+        assert!(buffer_contains_str(buf, "never"));
+    }
+
+    #[test]
+    fn render_branch_no_ahead_behind() {
+        let mut panel = GitStatusPanel::new();
+        panel.set_snapshot(GitSnapshot {
+            branch: "feature/test".to_string(),
+            head: "abc1234".to_string(),
+            ahead: 0,
+            behind: 0,
+            ..Default::default()
+        });
+        let terminal = render_component(&mut panel, 60, 20, true);
+        let buf = terminal.backend().buffer();
+        // Should NOT contain arrow indicators when both are 0
+        assert!(!buffer_contains_str(buf, "↑"));
+        assert!(!buffer_contains_str(buf, "↓"));
     }
 
     #[test]

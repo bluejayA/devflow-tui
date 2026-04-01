@@ -81,6 +81,31 @@ async fn poll_git(dir: &PathBuf) -> Result<GitSnapshot> {
         String::new()
     });
 
+    // Detect base branch for ahead/behind
+    let base_branch = git_cmd(dir, &["symbolic-ref", "refs/remotes/origin/HEAD"])
+        .await
+        .ok()
+        .and_then(|s| {
+            // "refs/remotes/origin/main" → "origin/main"
+            s.trim().strip_prefix("refs/remotes/").map(|b| b.to_string())
+        })
+        .unwrap_or_else(|| "origin/main".to_string());
+
+    let ahead = git_cmd(dir, &["rev-list", "--count", &format!("{base_branch}..HEAD")])
+        .await
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+
+    let behind = git_cmd(dir, &["rev-list", "--count", &format!("HEAD..{base_branch}")])
+        .await
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+
+    // Detect last fetch time from FETCH_HEAD
+    let last_fetch = fetch_elapsed(dir).await;
+
     let cwd = dir
         .canonicalize()
         .unwrap_or_else(|_| dir.clone())
@@ -94,6 +119,10 @@ async fn poll_git(dir: &PathBuf) -> Result<GitSnapshot> {
         commits: parse_log_oneline(&log_out),
         worktrees: parse_worktree_porcelain(&worktree_out, &cwd),
         diff_stat: parse_diff_stat(&diff_out),
+        ahead,
+        behind,
+        base_branch,
+        last_fetch,
     })
 }
 
@@ -126,6 +155,29 @@ async fn git_cmd(dir: &PathBuf, args: &[&str]) -> std::result::Result<String, St
             // Timeout — child is killed on drop
             Err(format!("git command timed out: git {}", args.join(" ")))
         }
+    }
+}
+
+// ── Fetch elapsed ──
+
+async fn fetch_elapsed(dir: &PathBuf) -> Option<String> {
+    // Use git-common-dir to handle worktrees correctly
+    let git_common_dir = git_cmd(dir, &["rev-parse", "--git-common-dir"])
+        .await
+        .ok()?;
+    let fetch_head = PathBuf::from(git_common_dir.trim()).join("FETCH_HEAD");
+    let metadata = std::fs::metadata(&fetch_head).ok()?;
+    let modified = metadata.modified().ok()?;
+    let elapsed = modified.elapsed().ok()?;
+    Some(format_elapsed(elapsed.as_secs()))
+}
+
+pub fn format_elapsed(secs: u64) -> String {
+    match secs {
+        0..=59 => "just now".to_string(),
+        60..=3599 => format!("{}m ago", secs / 60),
+        3600..=86399 => format!("{}h ago", secs / 3600),
+        _ => format!("{}d ago", secs / 86400),
     }
 }
 
@@ -402,6 +454,26 @@ u UU N... 100644 100644 100644 100644 abc123456789012345678901234567890123456789
         assert_eq!(wts.len(), 2);
         assert!(!wts[0].is_current);
         assert!(wts[1].is_current);
+    }
+
+    #[test]
+    fn test_format_elapsed_just_now() {
+        assert_eq!(format_elapsed(30), "just now");
+    }
+
+    #[test]
+    fn test_format_elapsed_minutes() {
+        assert_eq!(format_elapsed(180), "3m ago");
+    }
+
+    #[test]
+    fn test_format_elapsed_hours() {
+        assert_eq!(format_elapsed(7200), "2h ago");
+    }
+
+    #[test]
+    fn test_format_elapsed_days() {
+        assert_eq!(format_elapsed(172800), "2d ago");
     }
 
     #[test]

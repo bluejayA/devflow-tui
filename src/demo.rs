@@ -111,6 +111,10 @@ pub fn populate_demo_data(app: &mut App) {
             },
         ],
         worktrees: Vec::new(),
+        ahead: 5,
+        behind: 2,
+        base_branch: "origin/main".to_string(),
+        last_fetch: Some("3m ago".to_string()),
     };
     app.handle_git_snapshot(git_snapshot);
 
