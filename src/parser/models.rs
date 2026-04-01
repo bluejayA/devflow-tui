@@ -253,6 +253,10 @@ pub struct GitSnapshot {
     pub commits: Vec<GitCommit>,
     pub worktrees: Vec<GitWorktree>,
     pub diff_stat: DiffStat,
+    pub ahead: u32,
+    pub behind: u32,
+    pub base_branch: String,
+    pub last_fetch: Option<String>,
 }
 
 #[cfg(test)]
@@ -306,6 +310,20 @@ mod tests {
         assert!(snap.branch.is_empty());
         assert!(snap.changes.is_empty());
         assert_eq!(snap.diff_stat.additions, 0);
+    }
+
+    #[test]
+    fn test_git_snapshot_ahead_behind_default() {
+        let snap = GitSnapshot::default();
+        assert_eq!(snap.ahead, 0);
+        assert_eq!(snap.behind, 0);
+        assert!(snap.base_branch.is_empty());
+    }
+
+    #[test]
+    fn test_git_snapshot_last_fetch_default() {
+        let snap = GitSnapshot::default();
+        assert!(snap.last_fetch.is_none());
     }
 
     #[test]
