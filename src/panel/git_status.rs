@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Stylize;
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
@@ -9,7 +9,52 @@ use crate::action::Action;
 use crate::component::Component;
 use crate::event::AppEvent;
 use crate::parser::models::{GitChangeStatus, GitSnapshot};
-use crate::ui::theme::{self, Icons, Theme};
+use crate::ui::theme::{self, no_color, Icons, Theme};
+
+/// Returns a [`Style`] for a commit message based on conventional-commit prefix.
+///
+/// - `feat:` / `feat(scope):` → Green
+/// - `fix:` / `fix(scope):`   → Yellow
+/// - `chore:` / `docs:` / `refactor:` / `test:` / `ci:` → DarkGray
+/// - Starts with `Merge`      → Cyan
+/// - Everything else           → White
+///
+/// Respects `NO_COLOR` — returns `Style::default()` when set.
+fn commit_style(message: &str) -> Style {
+    if no_color() {
+        return Style::default();
+    }
+
+    let msg = message.trim_start();
+
+    // Check "Merge" prefix first (case-sensitive per git convention)
+    if msg.starts_with("Merge") {
+        return Style::default().fg(Color::Cyan);
+    }
+
+    // Extract prefix: everything before the first ':' (lowercased for comparison)
+    // Also strip optional scope in parentheses: "feat(ui)" → "feat"
+    let prefix = match msg.find(':') {
+        Some(colon_idx) => {
+            let raw = &msg[..colon_idx];
+            // Strip scope: "feat(ui)" → "feat"
+            match raw.find('(') {
+                Some(paren_idx) => &raw[..paren_idx],
+                None => raw,
+            }
+        }
+        None => return Style::default().fg(Color::White),
+    };
+
+    let prefix_lower = prefix.to_ascii_lowercase();
+
+    match prefix_lower.as_str() {
+        "feat" => Style::default().fg(Color::Green),
+        "fix" => Style::default().fg(Color::Yellow),
+        "chore" | "docs" | "refactor" | "test" | "ci" => Style::default().fg(Color::DarkGray),
+        _ => Style::default().fg(Color::White),
+    }
+}
 
 pub struct GitStatusPanel {
     snapshot: GitSnapshot,
@@ -169,7 +214,7 @@ impl Component for GitStatusPanel {
         for c in &self.snapshot.commits {
             bottom_lines.push(Line::from(vec![
                 Span::from(format!("    {} ", c.hash)).yellow(),
-                Span::from(c.message.as_str()).dim(),
+                Span::from(c.message.as_str()).style(commit_style(&c.message)),
             ]));
         }
 
@@ -181,8 +226,9 @@ impl Component for GitStatusPanel {
                     .branch
                     .as_deref()
                     .unwrap_or("(detached)");
+                let marker = if wt.is_current { "●" } else { "○" };
                 bottom_lines.push(Line::from(vec![
-                    Span::from("    ").dim(),
+                    Span::from(format!("   {marker} ")).dim(),
                     Span::from(branch_str).cyan(),
                     Span::from(format!("  {}", wt.path)).dim(),
                 ]));
@@ -313,6 +359,86 @@ mod tests {
         assert!(buffer_contains_str(buf, "fix: resolve crash"));
     }
 
+    // ── commit_style tests (FR-12) ──
+
+    #[test]
+    fn test_commit_style_feat() {
+        let style = commit_style("feat: add feature");
+        assert_eq!(style.fg, Some(Color::Green));
+    }
+
+    #[test]
+    fn test_commit_style_fix() {
+        let style = commit_style("fix: resolve bug");
+        assert_eq!(style.fg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn test_commit_style_chore() {
+        let style = commit_style("chore: cleanup");
+        assert_eq!(style.fg, Some(Color::DarkGray));
+    }
+
+    #[test]
+    fn test_commit_style_docs() {
+        let style = commit_style("docs: update readme");
+        assert_eq!(style.fg, Some(Color::DarkGray));
+    }
+
+    #[test]
+    fn test_commit_style_refactor() {
+        let style = commit_style("refactor: simplify logic");
+        assert_eq!(style.fg, Some(Color::DarkGray));
+    }
+
+    #[test]
+    fn test_commit_style_test() {
+        let style = commit_style("test: add unit tests");
+        assert_eq!(style.fg, Some(Color::DarkGray));
+    }
+
+    #[test]
+    fn test_commit_style_ci() {
+        let style = commit_style("ci: update pipeline");
+        assert_eq!(style.fg, Some(Color::DarkGray));
+    }
+
+    #[test]
+    fn test_commit_style_merge() {
+        let style = commit_style("Merge pull request #1 from feature/branch");
+        assert_eq!(style.fg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn test_commit_style_other() {
+        let style = commit_style("initial commit");
+        assert_eq!(style.fg, Some(Color::White));
+    }
+
+    #[test]
+    fn test_commit_style_case_insensitive() {
+        let style = commit_style("Feat: something");
+        assert_eq!(style.fg, Some(Color::Green));
+    }
+
+    #[test]
+    fn test_commit_style_with_scope() {
+        let style = commit_style("feat(ui): update layout");
+        assert_eq!(style.fg, Some(Color::Green));
+    }
+
+    #[test]
+    fn test_commit_style_fix_with_scope() {
+        let style = commit_style("fix(parser): handle edge case");
+        assert_eq!(style.fg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn test_commit_style_empty_string() {
+        let style = commit_style("");
+        assert_eq!(style.fg, Some(Color::White));
+    }
+
     #[test]
     fn render_worktrees_visible() {
         let mut panel = GitStatusPanel::new();
@@ -324,6 +450,7 @@ mod tests {
             worktrees: vec![GitWorktree {
                 path: "/tmp/wt".to_string(),
                 branch: Some("feature/wt".to_string()),
+                is_current: false,
             }],
             ..Default::default()
         });
@@ -331,5 +458,33 @@ mod tests {
         let buf = terminal.backend().buffer();
         assert!(buffer_contains_str(buf, "Worktrees:"));
         assert!(buffer_contains_str(buf, "feature/wt"));
+    }
+
+    #[test]
+    fn render_worktree_current_marker() {
+        let mut panel = GitStatusPanel::new();
+        panel.set_snapshot(GitSnapshot {
+            commits: vec![GitCommit {
+                hash: "abc1234".to_string(),
+                message: "init".to_string(),
+            }],
+            worktrees: vec![
+                GitWorktree {
+                    path: "/tmp/wt-current".to_string(),
+                    branch: Some("main".to_string()),
+                    is_current: true,
+                },
+                GitWorktree {
+                    path: "/tmp/wt-other".to_string(),
+                    branch: Some("feature/other".to_string()),
+                    is_current: false,
+                },
+            ],
+            ..Default::default()
+        });
+        let terminal = render_component(&mut panel, 60, 25, true);
+        let buf = terminal.backend().buffer();
+        assert!(buffer_contains_str(buf, "●"));
+        assert!(buffer_contains_str(buf, "○"));
     }
 }

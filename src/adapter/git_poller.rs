@@ -81,12 +81,18 @@ async fn poll_git(dir: &PathBuf) -> Result<GitSnapshot> {
         String::new()
     });
 
+    let cwd = dir
+        .canonicalize()
+        .unwrap_or_else(|_| dir.clone())
+        .to_string_lossy()
+        .to_string();
+
     Ok(GitSnapshot {
         branch: strip_ansi(branch.trim()),
         head: strip_ansi(head.trim()),
         changes: parse_status_porcelain_v2(&status_out),
         commits: parse_log_oneline(&log_out),
-        worktrees: parse_worktree_porcelain(&worktree_out),
+        worktrees: parse_worktree_porcelain(&worktree_out, &cwd),
         diff_stat: parse_diff_stat(&diff_out),
     })
 }
@@ -217,7 +223,10 @@ pub fn parse_log_oneline(output: &str) -> Vec<GitCommit> {
 }
 
 /// Parse `git worktree list --porcelain` output.
-pub fn parse_worktree_porcelain(output: &str) -> Vec<GitWorktree> {
+///
+/// `cwd` is the canonicalized project directory; worktrees whose path matches
+/// get `is_current = true`.
+pub fn parse_worktree_porcelain(output: &str, cwd: &str) -> Vec<GitWorktree> {
     let mut worktrees = Vec::new();
     let mut current_path: Option<String> = None;
     let mut current_branch: Option<String> = None;
@@ -227,6 +236,7 @@ pub fn parse_worktree_porcelain(output: &str) -> Vec<GitWorktree> {
             // Flush previous
             if let Some(p) = current_path.take() {
                 worktrees.push(GitWorktree {
+                    is_current: p == cwd,
                     path: p,
                     branch: current_branch.take(),
                 });
@@ -239,6 +249,7 @@ pub fn parse_worktree_porcelain(output: &str) -> Vec<GitWorktree> {
             // Blank line separates entries
             if let Some(p) = current_path.take() {
                 worktrees.push(GitWorktree {
+                    is_current: p == cwd,
                     path: p,
                     branch: current_branch.take(),
                 });
@@ -249,6 +260,7 @@ pub fn parse_worktree_porcelain(output: &str) -> Vec<GitWorktree> {
     // Flush last
     if let Some(p) = current_path.take() {
         worktrees.push(GitWorktree {
+            is_current: p == cwd,
             path: p,
             branch: current_branch.take(),
         });
@@ -346,7 +358,7 @@ u UU N... 100644 100644 100644 100644 abc123456789012345678901234567890123456789
     fn test_parse_worktree_porcelain() {
         let output = "worktree /Users/jay/project\nHEAD abc123\nbranch refs/heads/main\n\n\
                        worktree /Users/jay/project-feat\nHEAD def456\nbranch refs/heads/feature/tui\n\n";
-        let wts = parse_worktree_porcelain(output);
+        let wts = parse_worktree_porcelain(output, "");
         assert_eq!(wts.len(), 2);
         assert_eq!(wts[0].path, "/Users/jay/project");
         assert_eq!(wts[0].branch.as_deref(), Some("main"));
@@ -355,7 +367,7 @@ u UU N... 100644 100644 100644 100644 abc123456789012345678901234567890123456789
 
     #[test]
     fn test_parse_worktree_empty() {
-        let wts = parse_worktree_porcelain("");
+        let wts = parse_worktree_porcelain("", "");
         assert!(wts.is_empty());
     }
 
@@ -380,5 +392,23 @@ u UU N... 100644 100644 100644 100644 abc123456789012345678901234567890123456789
         let stat = parse_diff_stat(output);
         assert_eq!(stat.additions, 10);
         assert_eq!(stat.deletions, 0);
+    }
+
+    #[test]
+    fn test_parse_worktree_porcelain_is_current() {
+        let output = "worktree /Users/jay/project\nHEAD abc123\nbranch refs/heads/main\n\n\
+                       worktree /Users/jay/project-feat\nHEAD def456\nbranch refs/heads/feature/tui\n\n";
+        let wts = parse_worktree_porcelain(output, "/Users/jay/project-feat");
+        assert_eq!(wts.len(), 2);
+        assert!(!wts[0].is_current);
+        assert!(wts[1].is_current);
+    }
+
+    #[test]
+    fn test_parse_worktree_porcelain_cwd_no_match() {
+        let output = "worktree /Users/jay/project\nHEAD abc123\nbranch refs/heads/main\n\n";
+        let wts = parse_worktree_porcelain(output, "/Users/other/path");
+        assert_eq!(wts.len(), 1);
+        assert!(!wts[0].is_current);
     }
 }

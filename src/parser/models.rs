@@ -99,6 +99,7 @@ pub enum StageStatus {
     #[default]
     Waiting,
     Skipped,
+    Deferred,
 }
 
 // ── Work Marker ──
@@ -141,6 +142,12 @@ pub struct SkippedStage {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct DeferredStage {
+    pub name: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct WorktreeInfo {
     pub branch: Option<String>,
     pub path: Option<String>,
@@ -155,6 +162,7 @@ pub struct FlowState {
     pub completed_stages: Vec<CompletedStage>,
     pub approved_stages: Vec<ApprovedStage>,
     pub skipped_stages: Vec<SkippedStage>,
+    pub deferred_stages: Vec<DeferredStage>,
     pub active_unit: Option<String>,
     pub completed_units: Vec<String>,
     pub worktree: WorktreeInfo,
@@ -228,6 +236,7 @@ pub struct GitCommit {
 pub struct GitWorktree {
     pub path: String,
     pub branch: Option<String>,
+    pub is_current: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -297,5 +306,46 @@ mod tests {
         assert!(snap.branch.is_empty());
         assert!(snap.changes.is_empty());
         assert_eq!(snap.diff_stat.additions, 0);
+    }
+
+    #[test]
+    fn test_stage_status_deferred_variant_exists() {
+        let status = StageStatus::Deferred;
+        assert_eq!(status, StageStatus::Deferred);
+        // Deferred should be distinct from Skipped
+        assert_ne!(StageStatus::Deferred, StageStatus::Skipped);
+    }
+
+    #[test]
+    fn test_deferred_stage_struct() {
+        let ds = DeferredStage {
+            name: "user-stories".to_string(),
+            reason: Some("Deferred to wave 2".to_string()),
+        };
+        assert_eq!(ds.name, "user-stories");
+        assert_eq!(ds.reason.as_deref(), Some("Deferred to wave 2"));
+    }
+
+    #[test]
+    fn test_flow_state_has_deferred_stages() {
+        let state = FlowState::default();
+        assert!(state.deferred_stages.is_empty());
+    }
+
+    #[test]
+    fn test_git_worktree_is_current_field() {
+        let wt = GitWorktree {
+            path: "/tmp/wt".to_string(),
+            branch: Some("main".to_string()),
+            is_current: true,
+        };
+        assert!(wt.is_current);
+
+        let wt_default = GitWorktree {
+            path: "/tmp/other".to_string(),
+            branch: None,
+            is_current: false,
+        };
+        assert!(!wt_default.is_current);
     }
 }

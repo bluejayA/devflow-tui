@@ -30,8 +30,11 @@ const INCEPTION_STAGES: &[StageInfo] = &[
 
 const CONSTRUCTION_STAGES: &[StageInfo] = &[
     StageInfo { name: "functional-design", min_complexity: Some(Complexity::Comprehensive) },
+    StageInfo { name: "git-worktree", min_complexity: None },
     StageInfo { name: "code-generation", min_complexity: None },
     StageInfo { name: "build-and-test", min_complexity: None },
+    StageInfo { name: "code-review", min_complexity: None },
+    StageInfo { name: "finishing-branch", min_complexity: None },
 ];
 
 pub struct WorkflowMapPanel {
@@ -80,6 +83,9 @@ impl WorkflowMapPanel {
         if self.flow_state.skipped_stages.iter().any(|s| s.name == stage_name) {
             return StageStatus::Skipped;
         }
+        if self.flow_state.deferred_stages.iter().any(|s| s.name == stage_name) {
+            return StageStatus::Deferred;
+        }
         StageStatus::Waiting
     }
 
@@ -109,6 +115,7 @@ impl WorkflowMapPanel {
                 StageStatus::Completed => (Icons::done(), Theme::done()),
                 StageStatus::Waiting => (Icons::waiting(), Theme::waiting()),
                 StageStatus::Skipped => (Icons::skipped(), Theme::skipped()),
+                StageStatus::Deferred => (Icons::deferred(), Theme::deferred()),
             };
 
             let prefix = if i == visible.len() - 1 { "  └── " } else { "  ├── " };
@@ -321,6 +328,43 @@ mod tests {
     }
 
     #[test]
+    fn test_construction_stages_count() {
+        assert_eq!(CONSTRUCTION_STAGES.len(), 6);
+    }
+
+    #[test]
+    fn test_construction_stages_order() {
+        let names: Vec<&str> = CONSTRUCTION_STAGES.iter().map(|s| s.name).collect();
+        assert_eq!(
+            names,
+            vec![
+                "functional-design",
+                "git-worktree",
+                "code-generation",
+                "build-and-test",
+                "code-review",
+                "finishing-branch",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_new_construction_stages_visible_all_complexities() {
+        let new_stages = ["git-worktree", "code-review", "finishing-branch"];
+        for complexity in [Complexity::Minimal, Complexity::Standard, Complexity::Comprehensive] {
+            let mut panel = WorkflowMapPanel::new();
+            panel.flow_state.complexity = complexity;
+            for stage_name in &new_stages {
+                let info = CONSTRUCTION_STAGES.iter().find(|s| s.name == *stage_name).unwrap();
+                assert!(
+                    panel.is_visible(info),
+                    "{stage_name} should be visible at {complexity:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn render_comprehensive_complexity() {
         let mut panel = WorkflowMapPanel::new();
         panel.flow_state.complexity = Complexity::Comprehensive;
@@ -331,12 +375,51 @@ mod tests {
     }
 
     #[test]
+    fn render_new_construction_stages() {
+        let mut panel = WorkflowMapPanel::new();
+        panel.flow_state.complexity = Complexity::Minimal;
+        let terminal = render_component(&mut panel, 60, 30, true);
+        let buf = terminal.backend().buffer();
+        assert!(buffer_contains_str(buf, "git-worktree"));
+        assert!(buffer_contains_str(buf, "code-review"));
+        assert!(buffer_contains_str(buf, "finishing-branch"));
+    }
+
+    #[test]
     fn render_syncing_state() {
         let mut panel = WorkflowMapPanel::new();
         panel.set_syncing();
         let terminal = render_component(&mut panel, 60, 30, true);
         let buf = terminal.backend().buffer();
         assert!(buffer_contains_str(buf, "Syncing..."));
+    }
+
+    #[test]
+    fn test_stage_status_deferred() {
+        let mut panel = WorkflowMapPanel::new();
+        panel.flow_state.deferred_stages.push(
+            crate::parser::models::DeferredStage {
+                name: "user-stories".to_string(),
+                reason: Some("Deferred to wave 2".to_string()),
+            },
+        );
+        assert_eq!(panel.stage_status("user-stories"), StageStatus::Deferred);
+    }
+
+    #[test]
+    fn render_deferred_stage() {
+        let mut panel = WorkflowMapPanel::new();
+        panel.flow_state.complexity = Complexity::Standard;
+        panel.flow_state.deferred_stages.push(
+            crate::parser::models::DeferredStage {
+                name: "user-stories".to_string(),
+                reason: None,
+            },
+        );
+        let terminal = render_component(&mut panel, 60, 30, true);
+        let buf = terminal.backend().buffer();
+        assert!(buffer_contains_str(buf, "◇"));
+        assert!(buffer_contains_str(buf, "user-stories"));
     }
 
     #[test]

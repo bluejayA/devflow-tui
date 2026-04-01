@@ -46,6 +46,14 @@ impl Theme {
         }
     }
 
+    pub fn deferred() -> Style {
+        if no_color() {
+            Style::default().dim()
+        } else {
+            Style::new().yellow().dim()
+        }
+    }
+
     pub fn error() -> Style {
         if no_color() {
             Style::default().add_modifier(Modifier::BOLD)
@@ -153,6 +161,7 @@ impl Icons {
     pub fn done() -> &'static str { "✓" }
     pub fn waiting() -> &'static str { "○" }
     pub fn skipped() -> &'static str { "–" }
+    pub fn deferred() -> &'static str { "◇" }
     pub fn error() -> &'static str { "✗" }
     pub fn timeout() -> &'static str { "⏱" }
     pub fn staged() -> &'static str { "S" }
@@ -216,6 +225,18 @@ mod tests {
         let buf = terminal.backend().buffer();
         assert!(buffer_contains_str(buf, "✓"));
         assert!(buffer_contains_str(buf, "workspace-detection"));
+    }
+
+    #[test]
+    fn test_theme_deferred_style_exists() {
+        let style = Theme::deferred();
+        // Should be yellow+dim (distinct from skipped which is plain dark_gray)
+        assert_eq!(style.fg, Some(ratatui::style::Color::Yellow));
+    }
+
+    #[test]
+    fn test_icons_deferred() {
+        assert_eq!(Icons::deferred(), "◇");
     }
 
     #[test]
