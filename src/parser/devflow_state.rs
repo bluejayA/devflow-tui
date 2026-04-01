@@ -1,5 +1,6 @@
 use crate::parser::models::{
-    ApprovedStage, Complexity, CompletedStage, FlowState, Phase, SkippedStage, WorktreeInfo,
+    ApprovedStage, Complexity, CompletedStage, DeferredStage, FlowState, Phase, SkippedStage,
+    WorktreeInfo,
 };
 use crate::service::sanitizer::strip_ansi;
 
@@ -80,6 +81,9 @@ fn apply_section(state: &mut FlowState, section: &str, lines: &[String]) {
         "Skipped Stages" => {
             state.skipped_stages = parse_skipped_stages(lines);
         }
+        "Deferred Stages" => {
+            state.deferred_stages = parse_deferred_stages(lines);
+        }
         "Active Unit" => {
             if !value.is_empty() && value != "(pending)" {
                 state.active_unit = Some(value.to_string());
@@ -146,6 +150,22 @@ fn parse_skipped_stages(lines: &[String]) -> Vec<SkippedStage> {
                 (trimmed.trim().to_string(), None)
             };
             Some(SkippedStage { name, reason })
+        })
+        .collect()
+}
+
+fn parse_deferred_stages(lines: &[String]) -> Vec<DeferredStage> {
+    lines
+        .iter()
+        .filter_map(|l| {
+            let trimmed = l.trim().strip_prefix("- ")?;
+            let (name, reason) = if let Some((n, r)) = trimmed.split_once("—") {
+                let reason_val = r.trim().strip_prefix("reason:").map(|s| s.trim().to_string());
+                (n.trim().to_string(), reason_val)
+            } else {
+                (trimmed.trim().to_string(), None)
+            };
+            Some(DeferredStage { name, reason })
         })
         .collect()
 }
@@ -316,6 +336,34 @@ https://github.com/user/repo/pull/42
         assert_eq!(state.phase, Phase::Inception);
         assert!(state.stage.is_empty());
         assert_eq!(state.complexity, Complexity::Standard);
+    }
+
+    #[test]
+    fn test_parse_deferred_stages() {
+        let content = r#"# DevFlow State
+
+## Current Phase
+INCEPTION
+
+## Current Stage
+requirements-analysis
+
+## Complexity
+Standard
+
+## Deferred Stages
+- user-stories — reason: Deferred to wave 2
+- nfr-requirements
+"#;
+        let state = parse(content);
+        assert_eq!(state.deferred_stages.len(), 2);
+        assert_eq!(state.deferred_stages[0].name, "user-stories");
+        assert_eq!(
+            state.deferred_stages[0].reason.as_deref(),
+            Some("Deferred to wave 2")
+        );
+        assert_eq!(state.deferred_stages[1].name, "nfr-requirements");
+        assert!(state.deferred_stages[1].reason.is_none());
     }
 
     #[test]
