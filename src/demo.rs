@@ -2,7 +2,7 @@ use crate::app::App;
 use crate::event::AppEvent;
 use crate::parser::models::{
     AuditEntry, CompletedStage, Complexity, DiffStat, FlowState, GitChange, GitChangeStatus,
-    GitCommit, GitSnapshot, Phase, SessionSummary, WorkItem, WorkMarker,
+    GitCommit, GitSnapshot, Phase, SessionSummary, TokenRecord, TokenSnapshot, WorkItem, WorkMarker,
 };
 
 /// Populate the app with sample data for --demo mode.
@@ -172,6 +172,20 @@ pub fn populate_demo_data(app: &mut App) {
         agent_id: "old-agent".to_string(),
         agent_type: "code-review".to_string(),
     });
+
+    // Token usage
+    let token_snapshot = TokenSnapshot {
+        cumulative: TokenRecord {
+            input_tokens: 45_230,
+            output_tokens: 12_450,
+            cache_creation_input_tokens: 5_730,
+            cache_read_input_tokens: 128_900,
+        },
+        turn_count: 24,
+        burn_rate_per_min: 1_250.0,
+        recent_turns: Vec::new(),
+    };
+    app.token_usage.set_snapshot(token_snapshot);
 }
 
 #[cfg(test)]

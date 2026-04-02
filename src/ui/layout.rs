@@ -32,6 +32,7 @@ pub enum PanelAreas {
         git_status: Rect,
         agent_status: Rect,
         audit_log: Rect,
+        token_usage: Rect,
     },
     Wide {
         workflow_map: Rect,
@@ -40,6 +41,7 @@ pub enum PanelAreas {
         agent_status: Rect,
         audit_log: Rect,
         gate_alert: Rect,
+        token_usage: Rect,
     },
 }
 
@@ -112,6 +114,13 @@ impl LayoutManager {
         ])
         .areas(right);
 
+        // Right top: Git(fill) | Token(30%)
+        let [git, token] = Layout::horizontal([
+            Constraint::Fill(1),
+            Constraint::Percentage(30),
+        ])
+        .areas(right_top);
+
         // Right bottom: Agent(40%) | Audit(fill)
         let [agent, audit] = Layout::horizontal([
             Constraint::Percentage(40),
@@ -121,9 +130,10 @@ impl LayoutManager {
 
         PanelAreas::Standard {
             workflow_map: left,
-            git_status: right_top,
+            git_status: git,
             agent_status: agent,
             audit_log: audit,
+            token_usage: token,
         }
     }
 
@@ -135,10 +145,11 @@ impl LayoutManager {
         ])
         .areas(body);
 
-        // Top: 3 columns
-        let [wf, git, art] = Layout::horizontal([
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
+        // Top: 3 columns + token
+        let [wf, git, art, token] = Layout::horizontal([
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
             Constraint::Fill(1),
         ])
         .areas(top_row);
@@ -158,6 +169,7 @@ impl LayoutManager {
             agent_status: agent,
             audit_log: audit,
             gate_alert: gate,
+            token_usage: token,
         }
     }
 }

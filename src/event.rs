@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::parser::models::{ArtifactFile, AuditEntry, FlowState, GitSnapshot, SessionSummary};
+use crate::parser::models::{ArtifactFile, AuditEntry, FlowState, GitSnapshot, SessionSummary, TokenSnapshot};
 
 #[derive(Debug)]
 pub enum AppEvent {
@@ -30,6 +30,9 @@ pub enum AppEvent {
     TurnCompleted {
         last_message: String,
     },
+
+    // JSONL token watcher
+    TokenUsageUpdated(TokenSnapshot),
 
     // System
     HooksServerStarted {

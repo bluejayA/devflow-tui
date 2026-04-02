@@ -208,6 +208,58 @@ pub struct ArtifactFile {
     pub name: String,
 }
 
+// ── Token Usage Models ──
+
+#[derive(Debug, Clone, Default)]
+pub struct TokenRecord {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_creation_input_tokens: u64,
+    pub cache_read_input_tokens: u64,
+}
+
+impl TokenRecord {
+    pub fn total(&self) -> u64 {
+        self.input_tokens
+            .saturating_add(self.output_tokens)
+            .saturating_add(self.cache_creation_input_tokens)
+    }
+}
+
+/// A timestamped token record for burn rate windowing.
+#[derive(Debug, Clone)]
+pub struct TimestampedTokens {
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub tokens: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TokenSnapshot {
+    pub cumulative: TokenRecord,
+    pub turn_count: u32,
+    pub burn_rate_per_min: f64,
+    /// Recent turns for windowed burn rate calculation.
+    /// Entries older than the burn rate window are pruned on each accumulate.
+    pub recent_turns: Vec<TimestampedTokens>,
+}
+
+impl TokenSnapshot {
+    /// Total billable tokens (cache_read is free per Anthropic pricing).
+    pub fn total_billable(&self) -> u64 {
+        self.cumulative
+            .input_tokens
+            .saturating_add(self.cumulative.cache_creation_input_tokens)
+            .saturating_add(self.cumulative.output_tokens)
+    }
+
+    pub fn total_input_display(&self) -> u64 {
+        self.cumulative
+            .input_tokens
+            .saturating_add(self.cumulative.cache_creation_input_tokens)
+            .saturating_add(self.cumulative.cache_read_input_tokens)
+    }
+}
+
 // ── Git Models ──
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

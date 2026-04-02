@@ -13,6 +13,7 @@ use crate::panel::artifact_preview::ArtifactPreviewPanel;
 use crate::panel::audit_log::AuditLogPanel;
 use crate::panel::gate_alert::GateAlertPanel;
 use crate::panel::git_status::GitStatusPanel;
+use crate::panel::token_usage::TokenUsagePanel;
 use crate::panel::workflow_map::WorkflowMapPanel;
 use crate::parser::models::{FlowState, GitSnapshot};
 use crate::service::hook_config::{self, HookConfigStatus};
@@ -26,6 +27,7 @@ pub enum FocusPane {
     AuditLog,
     ArtifactPreview,
     GateAlert,
+    TokenUsage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +57,7 @@ pub struct App {
     pub audit_log: AuditLogPanel,
     pub artifact_preview: ArtifactPreviewPanel,
     pub gate_alert: GateAlertPanel,
+    pub token_usage: TokenUsagePanel,
 
     pub layout: LayoutManager,
     pub hooks_active: bool,
@@ -88,6 +91,7 @@ impl App {
             audit_log: AuditLogPanel::new(),
             artifact_preview: ArtifactPreviewPanel::new(),
             gate_alert: GateAlertPanel::new(),
+            token_usage: TokenUsagePanel::new(),
 
             layout: LayoutManager::new(width, height),
             hooks_active: false,
@@ -112,12 +116,14 @@ impl App {
                 FocusPane::AuditLog,
                 FocusPane::ArtifactPreview,
                 FocusPane::GateAlert,
+                FocusPane::TokenUsage,
             ],
             _ => vec![
                 FocusPane::WorkflowMap,
                 FocusPane::GitStatus,
                 FocusPane::AgentStatus,
                 FocusPane::AuditLog,
+                FocusPane::TokenUsage,
             ],
         }
     }
@@ -140,6 +146,7 @@ impl App {
             FocusPane::AuditLog => "Audit Log",
             FocusPane::ArtifactPreview => "Artifacts",
             FocusPane::GateAlert => "Gate Alert",
+            FocusPane::TokenUsage => "Token Usage",
         }
     }
 
@@ -151,6 +158,7 @@ impl App {
             FocusPane::AuditLog => &mut self.audit_log,
             FocusPane::ArtifactPreview => &mut self.artifact_preview,
             FocusPane::GateAlert => &mut self.gate_alert,
+            FocusPane::TokenUsage => &mut self.token_usage,
         }
     }
 
@@ -315,6 +323,7 @@ impl App {
         self.audit_log.handle_event(&event);
         self.artifact_preview.handle_event(&event);
         self.gate_alert.handle_event(&event);
+        self.token_usage.handle_event(&event);
 
         // App-level handling
         match &event {
@@ -365,6 +374,7 @@ impl App {
         self.git_status.clamp_scroll();
         self.agent_status.clamp_scroll();
         self.audit_log.clamp_scroll();
+        self.token_usage.clamp_scroll();
     }
 
     pub fn check_hooks_config(&mut self) {
@@ -494,6 +504,7 @@ impl App {
                 git_status,
                 agent_status,
                 audit_log,
+                token_usage,
             } => {
                 let focus = self.focus;
                 self.workflow_map
@@ -504,6 +515,8 @@ impl App {
                     .render(frame, agent_status, focus == FocusPane::AgentStatus);
                 self.audit_log
                     .render(frame, audit_log, focus == FocusPane::AuditLog);
+                self.token_usage
+                    .render(frame, token_usage, focus == FocusPane::TokenUsage);
             }
             PanelAreas::Wide {
                 workflow_map,
@@ -512,6 +525,7 @@ impl App {
                 agent_status,
                 audit_log,
                 gate_alert,
+                token_usage,
             } => {
                 let focus = self.focus;
                 self.workflow_map
@@ -529,6 +543,9 @@ impl App {
                 // Gate Alert panel
                 self.gate_alert
                     .render(frame, gate_alert, focus == FocusPane::GateAlert);
+
+                self.token_usage
+                    .render(frame, token_usage, focus == FocusPane::TokenUsage);
             }
         }
     }
@@ -556,6 +573,7 @@ impl App {
             FocusPane::AuditLog => self.audit_log.render(frame, area, true),
             FocusPane::ArtifactPreview => self.artifact_preview.render(frame, area, true),
             FocusPane::GateAlert => self.gate_alert.render(frame, area, true),
+            FocusPane::TokenUsage => self.token_usage.render(frame, area, true),
         }
     }
 }
@@ -577,7 +595,7 @@ mod tests {
     fn test_available_panels_compact() {
         let app = make_app(80, 24);
         let panels = app.available_panels();
-        assert_eq!(panels.len(), 4);
+        assert_eq!(panels.len(), 5);
         assert_eq!(panels[0], FocusPane::WorkflowMap);
     }
 
@@ -585,7 +603,7 @@ mod tests {
     fn test_available_panels_standard() {
         let app = make_app(120, 30);
         let panels = app.available_panels();
-        assert_eq!(panels.len(), 4);
+        assert_eq!(panels.len(), 5);
     }
 
     #[test]
@@ -623,6 +641,8 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Tab));
         assert_eq!(app.focus, FocusPane::AuditLog);
         app.handle_key(KeyEvent::from(KeyCode::Tab));
+        assert_eq!(app.focus, FocusPane::TokenUsage);
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
         assert_eq!(app.focus, FocusPane::WorkflowMap); // wraps around
     }
 
@@ -630,7 +650,7 @@ mod tests {
     fn test_handle_key_backtab_focus() {
         let mut app = make_app(80, 24);
         app.handle_key(KeyEvent::from(KeyCode::BackTab));
-        assert_eq!(app.focus, FocusPane::AuditLog); // wraps backward
+        assert_eq!(app.focus, FocusPane::TokenUsage); // wraps backward
     }
 
     #[test]
@@ -827,11 +847,12 @@ mod tests {
         });
         let buf = terminal.backend().buffer();
         assert!(buffer_contains_str(buf, "devflow-tui"));
-        // All 4 panels should have their titles
+        // All 5 panels should have their titles
         assert!(buffer_contains_str(buf, "Workflow Map"));
         assert!(buffer_contains_str(buf, "Git Status"));
         assert!(buffer_contains_str(buf, "Agent Status"));
         assert!(buffer_contains_str(buf, "Audit Log"));
+        assert!(buffer_contains_str(buf, "Token Usage"));
     }
 
     #[test]
@@ -898,17 +919,19 @@ mod tests {
     fn test_available_panels_wide_includes_gate() {
         let app = make_app(200, 50);
         let panels = app.available_panels();
-        assert_eq!(panels.len(), 6);
+        assert_eq!(panels.len(), 7);
         assert!(panels.contains(&FocusPane::GateAlert));
         assert!(panels.contains(&FocusPane::ArtifactPreview));
+        assert!(panels.contains(&FocusPane::TokenUsage));
     }
 
     #[test]
     fn test_available_panels_standard_excludes_gate() {
         let app = make_app(120, 30);
         let panels = app.available_panels();
-        assert_eq!(panels.len(), 4);
+        assert_eq!(panels.len(), 5);
         assert!(!panels.contains(&FocusPane::GateAlert));
+        assert!(panels.contains(&FocusPane::TokenUsage));
     }
 
     #[test]
@@ -955,12 +978,12 @@ mod tests {
     }
 
     #[test]
-    fn test_wide_tab_cycles_six_panels() {
+    fn test_wide_tab_cycles_seven_panels() {
         let mut app = make_app(200, 50);
         let panels = app.available_panels();
-        assert_eq!(panels.len(), 6);
+        assert_eq!(panels.len(), 7);
 
-        // Cycle through all 6 panels
+        // Cycle through all 7 panels
         app.handle_key(KeyEvent::from(KeyCode::Tab)); // → GitStatus
         app.handle_key(KeyEvent::from(KeyCode::Tab)); // → AgentStatus
         app.handle_key(KeyEvent::from(KeyCode::Tab)); // → AuditLog
@@ -968,6 +991,8 @@ mod tests {
         assert_eq!(app.focus, FocusPane::ArtifactPreview);
         app.handle_key(KeyEvent::from(KeyCode::Tab)); // → GateAlert
         assert_eq!(app.focus, FocusPane::GateAlert);
+        app.handle_key(KeyEvent::from(KeyCode::Tab)); // → TokenUsage
+        assert_eq!(app.focus, FocusPane::TokenUsage);
         app.handle_key(KeyEvent::from(KeyCode::Tab)); // → WorkflowMap (wrap)
         assert_eq!(app.focus, FocusPane::WorkflowMap);
     }
