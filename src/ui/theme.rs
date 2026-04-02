@@ -118,6 +118,22 @@ impl Theme {
         }
     }
 
+    pub fn token_normal() -> Style {
+        if no_color() {
+            Style::default()
+        } else {
+            Style::new().cyan()
+        }
+    }
+
+    pub fn token_label() -> Style {
+        if no_color() {
+            Style::default().dim()
+        } else {
+            Style::new().dark_gray()
+        }
+    }
+
     pub fn staged() -> Style {
         if no_color() { Style::default() } else { Style::new().green() }
     }

@@ -14,6 +14,7 @@ use devflow_tui::adapter::file_watcher;
 use devflow_tui::adapter::git_poller;
 use devflow_tui::adapter::handle::AdapterHandle;
 use devflow_tui::adapter::hooks_server;
+use devflow_tui::adapter::jsonl_watcher;
 use devflow_tui::app::App;
 use devflow_tui::config::AppConfig;
 use devflow_tui::event::AppEvent;
@@ -113,6 +114,12 @@ async fn main() -> devflow_tui::error::Result<()> {
         let hs_port = config.port;
         adapters.push(AdapterHandle::spawn("hooks_server", |cancel| async move {
             hooks_server::run(cancel, hs_port, hs_token, hs_event_tx).await
+        }));
+
+        let project_dir = config.project_dir.clone();
+        let jw_event_tx = event_tx.clone();
+        adapters.push(AdapterHandle::spawn("jsonl_watcher", |cancel| async move {
+            jsonl_watcher::run(cancel, project_dir, jw_event_tx).await
         }));
     }
 
